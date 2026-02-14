@@ -34,6 +34,110 @@ class Action(commands.Cog):
         staff_roles = ["moderator", "support", "control", "admin", "developer", "owner"]
         return any(self._check_permission(member, r) for r in staff_roles)
 
+    async def _send_log(self, inter, action_type, sub_type, target, duration=None, reason=None, gender=None):
+        """Универсальный метод для отправки логов в стиле, как на скринах"""
+        guild = inter.guild
+        channel = guild.get_channel(self.config["log_channel"])
+        if not channel:
+            return
+
+        # Определяем заголовок и цвет
+        if action_type == "mute":
+            title = f"🔇 Логи — {'Текстовый' if sub_type=='text' else 'Голосовой'} мут"
+            color = disnake.Color.dark_gray()
+        elif action_type == "unmute":
+            title = f"🔊 Логи — Снятие мута"
+            color = disnake.Color.green()
+        elif action_type == "ban":
+            title = "🔨 Логи — Бан"
+            color = disnake.Color.red()
+        elif action_type == "unban":
+            title = "🔓 Логи — Разбан"
+            color = disnake.Color.green()
+        elif action_type == "warn":
+            title = "⚠ Логи — Предупреждение"
+            color = disnake.Color.orange()
+        elif action_type == "unwarn":
+            title = "✅ Логи — Снятие предупреждения"
+            color = disnake.Color.green()
+        elif action_type == "remark":
+            title = "📝 Логи — Замечание"
+            color = disnake.Color.gold()
+        elif action_type == "unremark":
+            title = "✅ Логи — Снятие замечания"
+            color = disnake.Color.green()
+        elif action_type == "suspension":
+            title = "⏳ Логи — Отстранение (ивент бан)"
+            color = disnake.Color.dark_red()
+        elif action_type == "unsuspension":
+            title = "🔄 Логи — Снятие отстранения"
+            color = disnake.Color.green()
+        elif action_type == "chs":
+            title = f"⛔ Логи — ЧС состава ({sub_type})"
+            color = disnake.Color.red()
+        elif action_type == "unchs":
+            title = f"✅ Логи — Снятие ЧС ({sub_type})"
+            color = disnake.Color.green()
+        elif action_type == "gender":
+            title = "⚥ Логи смены гендера"
+            color = disnake.Color.blurple()
+        elif action_type == "verify":
+            title = "✅ Логи — Верификация"
+            color = disnake.Color.green()
+        elif action_type == "nedopusk":
+            title = "🚫 Логи — Недопуск"
+            color = disnake.Color.dark_red()
+        elif action_type == "unnedopusk":
+            title = "🟢 Логи — Снятие недопуска"
+            color = disnake.Color.green()
+        elif action_type == "reprimand":
+            title = f"📢 Логи — Выговор ({sub_type})"
+            color = disnake.Color.red()
+        elif action_type == "unreprimand":
+            title = "🔇 Логи — Снятие выговора"
+            color = disnake.Color.green()
+        else:
+            title = "Логи"
+            color = disnake.Color.blue()
+
+        embed = disnake.Embed(title=title, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
+
+        # Определяем, выдаём или снимаем
+        if action_type.startswith("un") or action_type in ["unmute", "unban", "unwarn", "unremark", "unsuspension", "unchs", "unnedopusk", "unreprimand"]:
+            embed.add_field(name="Снятие наказания", value="", inline=False)
+        else:
+            embed.add_field(name="Выдача наказания", value="", inline=False)
+
+        # Исполнитель
+        embed.add_field(name="Исполнитель", value=f"{inter.author.mention}\n• {inter.author.name}\n• ID: {inter.author.id}", inline=False)
+
+        # Цель (нарушитель)
+        embed.add_field(name="Нарушитель" if action_type not in ["gender", "verify"] else "Пользователь",
+                        value=f"{target.mention}\n• {target.name}\n• ID: {target.id}", inline=False)
+
+        # Длительность (если есть)
+        if duration:
+            if isinstance(duration, str):
+                embed.add_field(name="Длительность", value=duration, inline=False)
+            else:
+                embed.add_field(name="Длительность", value=f"<t:{int(duration)}:R>", inline=False)
+
+        # Причина / описание
+        if reason:
+            embed.add_field(name="Причина" if action_type not in ["gender"] else "Гендер", value=reason, inline=False)
+
+        # Для смены гендера добавляем поле "Гендер"
+        if action_type == "gender" and gender:
+            embed.add_field(name="Гендер", value=gender, inline=False)
+
+        # Дата внизу (уже есть timestamp, но можно добавить явно)
+        embed.set_footer(text=f"{datetime.datetime.now(datetime.timezone.utc).strftime('%d/%m/%Y, %H:%M')}")
+
+        await channel.send(embed=embed)
+
+    # ------------------------------------------------------------------
+    # Команда /action
+    # ------------------------------------------------------------------
     @commands.slash_command(name="action", description="Панель модерации")
     async def action(self, inter: disnake.AppCmdInter, user: disnake.Member):
         if not self._is_staff(inter.author):
@@ -52,21 +156,24 @@ class Action(commands.Cog):
         view = await ActionView.create(self, user, inter.author)
         await inter.response.send_message(embed=embed, view=view, ephemeral=True)
 
+    # ------------------------------------------------------------------
+    # Обработчики кнопок
+    # ------------------------------------------------------------------
     @commands.Cog.listener()
     async def on_button_click(self, inter: disnake.MessageInteraction):
         custom_id = inter.component.custom_id
         parts = custom_id.split('_')
         action = parts[0]
         
-        # Обработка специальных случаев: mute_text_ID и mute_voice_ID
+        # Обработка мута (custom_id: mute_text_123, mute_voice_123)
         if action == "mute" and len(parts) >= 3:
             mute_type = parts[1]  # text или voice
             target_id = int(parts[2])
             target = inter.guild.get_member(target_id)
             await self.handle_mute(inter, target, mute_type)
             return
-        
-        # Для остальных кнопок формат: действие_ID
+
+        # Остальные кнопки: формат "действие_id"
         target_id = int(parts[1]) if len(parts) > 1 else None
         target = inter.guild.get_member(target_id) if target_id else None
 
@@ -91,27 +198,14 @@ class Action(commands.Cog):
             "chs": self.handle_chs,
             "unchs": self.handle_unchs,
         }
-        
+
         handler = handlers.get(action)
         if handler:
             await handler(inter, target)
-        else:
-            await inter.response.send_message("Неизвестное действие.", ephemeral=True)
 
-    # ========== Вспомогательные методы ==========
-    async def _send_log(self, guild, title, color, fields):
-        embed = disnake.Embed(title=title, color=color)
-        for name, value in fields:
-            embed.add_field(name=name, value=value, inline=False)
-        await log_action(guild, self.config["log_channel"], embed)
-
-    async def _dm_user(self, user, text):
-        try:
-            await user.send(text)
-        except:
-            pass
-
-    # ========== Обработчики действий ==========
+    # ------------------------------------------------------------------
+    # Обработчики действий (все с проверками прав и вызовом логов)
+    # ------------------------------------------------------------------
     async def handle_ban(self, inter, target):
         if not (self._check_permission(inter.author, "moderator") or self._has_full_access(inter.author)):
             await inter.response.send_message("❌ Недостаточно прав.", ephemeral=True)
@@ -385,9 +479,7 @@ class Action(commands.Cog):
         await inter.response.send_modal(modal)
 
 
-# ==========================================================================
-# Классы View и Modal (все необходимые)
-# ==========================================================================
+# ==================== VIEWS (ДЛЯ ВЫБОРА) ====================
 
 class DisableableButton(disnake.ui.Button):
     pass
@@ -424,6 +516,7 @@ class ActionView(disnake.ui.View):
         is_support = cog._check_permission(moderator, "support") or has_full
         is_admin = cog._check_permission(moderator, "admin") or has_full
 
+        # ---- Модератор ----
         if is_mod:
             self.add_item(DisableableButton(
                 label="🔨 Забанить",
@@ -493,6 +586,7 @@ class ActionView(disnake.ui.View):
                     disabled=not has_remark
                 ))
 
+        # ---- Саппорт ----
         if is_support:
             self.add_item(DisableableButton(
                 label="⚥ Сменить пол",
@@ -521,6 +615,7 @@ class ActionView(disnake.ui.View):
                 disabled=not has_nedopusk
             ))
 
+        # ---- Для всех стафф (истории) ----
         if is_mod or is_support or is_admin:
             self.add_item(DisableableButton(
                 label=f"📜 История нарушений — {violations_count}",
@@ -535,6 +630,7 @@ class ActionView(disnake.ui.View):
                 disabled=False
             ))
 
+        # ---- Админ (выговор, ЧС) ----
         if is_admin:
             self.add_item(DisableableButton(
                 label="📢 Выдать выговор",
@@ -564,7 +660,114 @@ class ActionView(disnake.ui.View):
         return self
 
 
-# ===== Модальные окна =====
+class GenderView(disnake.ui.View):
+    def __init__(self, cog, target, change):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.target = target
+        self.change = change  # True - смена пола, False - верификация
+
+    @disnake.ui.button(label="♂ Мужской", style=disnake.ButtonStyle.blurple, custom_id="gender_male")
+    async def male_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        await self.process_gender(inter, "male")
+
+    @disnake.ui.button(label="♀ Женский", style=disnake.ButtonStyle.blurple, custom_id="gender_female")
+    async def female_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        await self.process_gender(inter, "female")
+
+    async def process_gender(self, inter, gender):
+        male_role = self.cog.config["roles"]["verif_male"]
+        female_role = self.cog.config["roles"]["verif_female"]
+        unverified_role = self.cog.config["roles"]["unverified"]
+
+        # Снимаем все гендерные роли
+        await self.target.remove_roles(inter.guild.get_role(male_role), reason="Смена пола/верификация")
+        await self.target.remove_roles(inter.guild.get_role(female_role), reason="Смена пола/верификация")
+
+        # Выдаём выбранную
+        new_role = male_role if gender == "male" else female_role
+        await self.target.add_roles(inter.guild.get_role(new_role), reason="Смена пола/верификация")
+
+        if not self.change:  # верификация - снимаем unverified
+            await self.target.remove_roles(inter.guild.get_role(unverified_role), reason="Верификация")
+            # Перемещаем в общий голосовой канал (опционально)
+            # Например, в первый попавшийся
+            for vc in inter.guild.voice_channels:
+                await self.target.move_to(vc)
+                break
+
+        # Логирование через общий метод
+        await self.cog._send_log(
+            inter,
+            "gender" if self.change else "verify",
+            None,
+            self.target,
+            gender=gender
+        )
+
+        await inter.response.send_message(f"✅ Пол успешно изменён на {'мужской' if gender=='male' else 'женский'}.", ephemeral=True)
+
+
+class ReprimandBranchView(disnake.ui.View):
+    def __init__(self, cog, target):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.target = target
+
+    @disnake.ui.button(label="Саппорты", style=disnake.ButtonStyle.red, custom_id="reprimand_support")
+    async def support_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        modal = ReprimandModal(self.cog, self.target, "support")
+        await inter.response.send_modal(modal)
+
+    @disnake.ui.button(label="Модераторы", style=disnake.ButtonStyle.red, custom_id="reprimand_moderator")
+    async def moderator_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        modal = ReprimandModal(self.cog, self.target, "moderator")
+        await inter.response.send_modal(modal)
+
+    @disnake.ui.button(label="Контроль", style=disnake.ButtonStyle.red, custom_id="reprimand_control")
+    async def control_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        modal = ReprimandModal(self.cog, self.target, "control")
+        await inter.response.send_modal(modal)
+
+    @disnake.ui.button(label="Администрация", style=disnake.ButtonStyle.red, custom_id="reprimand_admin")
+    async def admin_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        modal = ReprimandModal(self.cog, self.target, "admin")
+        await inter.response.send_modal(modal)
+
+
+class CHSBranchView(disnake.ui.View):
+    def __init__(self, cog, target):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.target = target
+
+    @disnake.ui.button(label="Саппорты", style=disnake.ButtonStyle.red, custom_id="chs_support")
+    async def support_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        modal = CHSModal(self.cog, self.target, "support")
+        await inter.response.send_modal(modal)
+
+    @disnake.ui.button(label="Модераторы", style=disnake.ButtonStyle.red, custom_id="chs_moderator")
+    async def moderator_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        modal = CHSModal(self.cog, self.target, "moderator")
+        await inter.response.send_modal(modal)
+
+    @disnake.ui.button(label="Контроль", style=disnake.ButtonStyle.red, custom_id="chs_control")
+    async def control_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        modal = CHSModal(self.cog, self.target, "control")
+        await inter.response.send_modal(modal)
+
+    @disnake.ui.button(label="Администрация", style=disnake.ButtonStyle.red, custom_id="chs_admin")
+    async def admin_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        modal = CHSModal(self.cog, self.target, "admin")
+        await inter.response.send_modal(modal)
+
+    @disnake.ui.button(label="Общий ЧС", style=disnake.ButtonStyle.red, custom_id="chs_common")
+    async def common_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
+        modal = CHSModal(self.cog, self.target, "common")
+        await inter.response.send_modal(modal)
+
+
+# ==================== МОДАЛЬНЫЕ ОКНА ====================
 
 class BanModal(disnake.ui.Modal):
     def __init__(self, cog, target):
@@ -604,16 +807,7 @@ class BanModal(disnake.ui.Modal):
         await self.target.edit(roles=[role])
         add_punishment(self.target.id, "ban", role.id, end_time, reason)
 
-        embed = disnake.Embed(title="🔨 Бан", color=disnake.Color.red())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Нарушитель", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        if end_time:
-            embed.add_field(name="Срок", value=f"до <t:{int(end_time)}:f>")
-        else:
-            embed.add_field(name="Срок", value="бессрочно")
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+        await self.cog._send_log(inter, "ban", None, self.target, end_time, reason)
         await self.cog._dm_user(self.target, f"🚫 Вы получили бан.\nПричина: {reason}")
         await inter.response.send_message(f"✅ Пользователь {self.target.mention} забанен.", ephemeral=True)
 
@@ -624,7 +818,7 @@ class UnbanModal(disnake.ui.Modal):
         self.target = target
         components = [
             disnake.ui.TextInput(
-                label="Причина снятия бана",
+                label="Причина снятия",
                 placeholder="Укажите причину",
                 custom_id="reason",
                 style=disnake.TextInputStyle.paragraph,
@@ -639,13 +833,7 @@ class UnbanModal(disnake.ui.Modal):
         if role in self.target.roles:
             await self.target.remove_roles(role, reason=reason)
             remove_punishment(self.target.id, role.id)
-
-            embed = disnake.Embed(title="🔓 Разбан", color=disnake.Color.green())
-            embed.add_field(name="Модератор", value=inter.author.mention)
-            embed.add_field(name="Пользователь", value=self.target.mention)
-            embed.add_field(name="Причина", value=reason, inline=False)
-            await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+            await self.cog._send_log(inter, "unban", None, self.target, reason=reason)
             await self.cog._dm_user(self.target, f"✅ Ваш бан снят.\nПричина: {reason}")
             await inter.response.send_message(f"✅ Бан снят с {self.target.mention}.", ephemeral=True)
         else:
@@ -658,8 +846,8 @@ class WarnModal(disnake.ui.Modal):
         self.target = target
         components = [
             disnake.ui.TextInput(
-                label="Причина предупреждения",
-                placeholder="Укажите причину",
+                label="Причина",
+                placeholder="Укажите причину предупреждения",
                 custom_id="reason",
                 style=disnake.TextInputStyle.paragraph,
                 max_length=500,
@@ -669,7 +857,7 @@ class WarnModal(disnake.ui.Modal):
 
     async def callback(self, inter: disnake.ModalInteraction):
         reason = inter.text_values["reason"]
-        # Определяем, какую роль предупреждения выдавать (упрощённо)
+        # Определяем роль предупреждения в зависимости от ролей цели (упрощённо)
         if self.cog._check_permission(self.target, "moderator"):
             role_id = self.cog.config["roles"]["warn_moderator"]
             warn_type = "moderator_warn"
@@ -678,19 +866,10 @@ class WarnModal(disnake.ui.Modal):
             warn_type = "support_warn"
 
         role = inter.guild.get_role(role_id)
-        if role in self.target.roles:
-            await inter.response.send_message("❌ У пользователя уже есть активное предупреждение данного типа.", ephemeral=True)
-            return
-
         await self.target.add_roles(role, reason=reason)
         add_punishment(self.target.id, warn_type, role.id, None, reason)
 
-        embed = disnake.Embed(title="⚠ Предупреждение", color=disnake.Color.orange())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Пользователь", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+        await self.cog._send_log(inter, "warn", None, self.target, reason=reason)
         await self.cog._dm_user(self.target, f"⚠ Вы получили предупреждение.\nПричина: {reason}")
         await inter.response.send_message(f"✅ Предупреждение выдано {self.target.mention}.", ephemeral=True)
 
@@ -701,7 +880,7 @@ class UnwarnModal(disnake.ui.Modal):
         self.target = target
         components = [
             disnake.ui.TextInput(
-                label="Причина снятия предупреждения",
+                label="Причина снятия",
                 placeholder="Укажите причину",
                 custom_id="reason",
                 style=disnake.TextInputStyle.paragraph,
@@ -728,13 +907,7 @@ class UnwarnModal(disnake.ui.Modal):
         if role in self.target.roles:
             await self.target.remove_roles(role, reason=reason)
             remove_punishment(self.target.id, role.id)
-
-            embed = disnake.Embed(title="✅ Снятие предупреждения", color=disnake.Color.green())
-            embed.add_field(name="Модератор", value=inter.author.mention)
-            embed.add_field(name="Пользователь", value=self.target.mention)
-            embed.add_field(name="Причина", value=reason, inline=False)
-            await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+            await self.cog._send_log(inter, "unwarn", None, self.target, reason=reason)
             await self.cog._dm_user(self.target, f"✅ Ваше предупреждение снято.\nПричина: {reason}")
             await inter.response.send_message(f"✅ Предупреждение снято с {self.target.mention}.", ephemeral=True)
         else:
@@ -758,25 +931,12 @@ class RemarkModal(disnake.ui.Modal):
 
     async def callback(self, inter: disnake.ModalInteraction):
         reason = inter.text_values["reason"]
-        role_id = self.cog.config["roles"].get("remark")
-        if not role_id:
-            await inter.response.send_message("❌ Роль замечания не настроена.", ephemeral=True)
-            return
+        role_id = self.cog.config["roles"]["remark"]
         role = inter.guild.get_role(role_id)
-        if role in self.target.roles:
-            await inter.response.send_message("❌ У пользователя уже есть активное замечание.", ephemeral=True)
-            return
-
         await self.target.add_roles(role, reason=reason)
         add_punishment(self.target.id, "remark", role.id, None, reason)
-
-        embed = disnake.Embed(title="📝 Замечание", color=disnake.Color.orange())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Пользователь", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
-        await self.cog._dm_user(self.target, f"📝 Вам вынесено замечание.\nПричина: {reason}")
+        await self.cog._send_log(inter, "remark", None, self.target, reason=reason)
+        await self.cog._dm_user(self.target, f"📝 Вы получили замечание.\nПричина: {reason}")
         await inter.response.send_message(f"✅ Замечание выдано {self.target.mention}.", ephemeral=True)
 
 
@@ -786,7 +946,7 @@ class UnremarkModal(disnake.ui.Modal):
         self.target = target
         components = [
             disnake.ui.TextInput(
-                label="Причина снятия замечания",
+                label="Причина снятия",
                 placeholder="Укажите причину",
                 custom_id="reason",
                 style=disnake.TextInputStyle.paragraph,
@@ -797,34 +957,23 @@ class UnremarkModal(disnake.ui.Modal):
 
     async def callback(self, inter: disnake.ModalInteraction):
         reason = inter.text_values["reason"]
-        role_id = self.cog.config["roles"].get("remark")
-        if not role_id:
-            await inter.response.send_message("❌ Роль замечания не настроена.", ephemeral=True)
-            return
+        role_id = self.cog.config["roles"]["remark"]
         role = inter.guild.get_role(role_id)
-        if role not in self.target.roles:
-            await inter.response.send_message("❌ У пользователя нет активного замечания.", ephemeral=True)
-            return
-
-        await self.target.remove_roles(role, reason=reason)
-        remove_punishment(self.target.id, role.id)
-
-        embed = disnake.Embed(title="✅ Снятие замечания", color=disnake.Color.green())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Пользователь", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
-        await self.cog._dm_user(self.target, f"✅ Ваше замечание снято.\nПричина: {reason}")
-        await inter.response.send_message(f"✅ Замечание снято с {self.target.mention}.", ephemeral=True)
+        if role in self.target.roles:
+            await self.target.remove_roles(role, reason=reason)
+            remove_punishment(self.target.id, role.id)
+            await self.cog._send_log(inter, "unremark", None, self.target, reason=reason)
+            await self.cog._dm_user(self.target, f"✅ Ваше замечание снято.\nПричина: {reason}")
+            await inter.response.send_message(f"✅ Замечание снято с {self.target.mention}.", ephemeral=True)
+        else:
+            await inter.response.send_message("❌ У пользователя нет замечания.", ephemeral=True)
 
 
 class MuteModal(disnake.ui.Modal):
     def __init__(self, cog, target, mute_type):
         self.cog = cog
         self.target = target
-        self.mute_type = mute_type  # "text" или "voice"
-        title = f"{'Текстовый' if mute_type=='text' else 'Голосовой'} мут {target.display_name}"
+        self.mute_type = mute_type
         components = [
             disnake.ui.TextInput(
                 label="Причина мута",
@@ -841,6 +990,7 @@ class MuteModal(disnake.ui.Modal):
                 max_length=10,
             )
         ]
+        title = f"{'Текстовый' if mute_type=='text' else 'Голосовой'} мут {target.display_name}"
         super().__init__(title=title, components=components)
 
     async def callback(self, inter: disnake.ModalInteraction):
@@ -857,23 +1007,11 @@ class MuteModal(disnake.ui.Modal):
 
         role_id = self.cog.config["roles"]["mute_text"] if self.mute_type == "text" else self.cog.config["roles"]["mute_voice"]
         role = inter.guild.get_role(role_id)
-        if role in self.target.roles:
-            await inter.response.send_message(f"❌ У пользователя уже есть {'текстовый' if self.mute_type=='text' else 'голосовой'} мут.", ephemeral=True)
-            return
 
         await self.target.add_roles(role, reason=reason)
         add_punishment(self.target.id, f"mute_{self.mute_type}", role.id, end_time, reason)
 
-        embed = disnake.Embed(title=f"🔇 {'Текстовый' if self.mute_type=='text' else 'Голосовой'} мут", color=disnake.Color.dark_gray())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Пользователь", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        if end_time:
-            embed.add_field(name="Срок", value=f"до <t:{int(end_time)}:f>")
-        else:
-            embed.add_field(name="Срок", value="бессрочно")
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+        await self.cog._send_log(inter, "mute", self.mute_type, self.target, end_time, reason)
         await self.cog._dm_user(self.target, f"🔇 Вы получили {'текстовый' if self.mute_type=='text' else 'голосовой'} мут.\nПричина: {reason}")
         await inter.response.send_message(f"✅ Мут выдан {self.target.mention}.", ephemeral=True)
 
@@ -911,13 +1049,7 @@ class UnmuteModal(disnake.ui.Modal):
         if role in self.target.roles:
             await self.target.remove_roles(role, reason=reason)
             remove_punishment(self.target.id, role.id)
-
-            embed = disnake.Embed(title="🔊 Снятие мута", color=disnake.Color.green())
-            embed.add_field(name="Модератор", value=inter.author.mention)
-            embed.add_field(name="Пользователь", value=self.target.mention)
-            embed.add_field(name="Причина", value=reason, inline=False)
-            await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+            await self.cog._send_log(inter, "unmute", None, self.target, reason=reason)
             await self.cog._dm_user(self.target, f"✅ Ваш мут снят.\nПричина: {reason}")
             await inter.response.send_message(f"✅ Мут снят с {self.target.mention}.", ephemeral=True)
         else:
@@ -944,25 +1076,18 @@ class NedopuskModal(disnake.ui.Modal):
         nedopusk_role = inter.guild.get_role(self.cog.config["roles"]["nedopusk"])
         unverified_role = inter.guild.get_role(self.cog.config["roles"]["unverified"])
 
-        if nedopusk_role in self.target.roles:
-            await inter.response.send_message("❌ У пользователя уже есть недопуск.", ephemeral=True)
-            return
-
         await self.target.remove_roles(unverified_role, reason=reason)
         await self.target.add_roles(nedopusk_role, reason=reason)
         add_punishment(self.target.id, "nedopusk", nedopusk_role.id, None, reason)
 
-        embed = disnake.Embed(title="🚫 Недопуск", color=disnake.Color.dark_red())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Пользователь", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
-        await self.cog._dm_user(self.target, f"🚫 Вам выдан недопуск.\nПричина: {reason}")
+        # Кик с голосового канала (перемещение в none)
         try:
-            await self.target.move_to(None, reason="Недопуск")
+            await self.target.move_to(None)
         except:
             pass
+
+        await self.cog._send_log(inter, "nedopusk", None, self.target, reason=reason)
+        await self.cog._dm_user(self.target, f"🚫 Вам выдан недопуск.\nПричина: {reason}")
         await inter.response.send_message(f"✅ Недопуск выдан {self.target.mention}.", ephemeral=True)
 
 
@@ -985,87 +1110,14 @@ class UnNedopuskModal(disnake.ui.Modal):
         reason = inter.text_values["reason"]
         nedopusk_role = inter.guild.get_role(self.cog.config["roles"]["nedopusk"])
 
-        if nedopusk_role not in self.target.roles:
+        if nedopusk_role in self.target.roles:
+            await self.target.remove_roles(nedopusk_role, reason=reason)
+            remove_punishment(self.target.id, nedopusk_role.id)
+            await self.cog._send_log(inter, "unnedopusk", None, self.target, reason=reason)
+            await self.cog._dm_user(self.target, f"✅ Ваш недопуск снят.\nПричина: {reason}")
+            await inter.response.send_message(f"✅ Недопуск снят с {self.target.mention}.", ephemeral=True)
+        else:
             await inter.response.send_message("❌ У пользователя нет недопуска.", ephemeral=True)
-            return
-
-        await self.target.remove_roles(nedopusk_role, reason=reason)
-        remove_punishment(self.target.id, nedopusk_role.id)
-
-        embed = disnake.Embed(title="✅ Снятие недопуска", color=disnake.Color.green())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Пользователь", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
-        await self.cog._dm_user(self.target, f"✅ Ваш недопуск снят.\nПричина: {reason}")
-        await inter.response.send_message(f"✅ Недопуск снят с {self.target.mention}.", ephemeral=True)
-
-
-class GenderView(disnake.ui.View):
-    def __init__(self, cog, target, change):
-        super().__init__(timeout=60)
-        self.cog = cog
-        self.target = target
-        self.change = change
-
-    @disnake.ui.button(label="♂ Мужской", style=disnake.ButtonStyle.blurple, custom_id="gender_male")
-    async def male_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.process_gender(inter, "male")
-
-    @disnake.ui.button(label="♀ Женский", style=disnake.ButtonStyle.blurple, custom_id="gender_female")
-    async def female_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.process_gender(inter, "female")
-
-    async def process_gender(self, inter, gender):
-        male_role = self.cog.config["roles"]["verif_male"]
-        female_role = self.cog.config["roles"]["verif_female"]
-        unverified_role = self.cog.config["roles"]["unverified"]
-
-        await self.target.remove_roles(inter.guild.get_role(male_role), reason="Смена пола/верификация")
-        await self.target.remove_roles(inter.guild.get_role(female_role), reason="Смена пола/верификация")
-
-        new_role = male_role if gender == "male" else female_role
-        await self.target.add_roles(inter.guild.get_role(new_role), reason="Смена пола/верификация")
-
-        if not self.change:  # верификация
-            await self.target.remove_roles(inter.guild.get_role(unverified_role), reason="Верификация")
-
-        await inter.response.send_message(f"✅ Пол успешно изменён на {'мужской' if gender=='male' else 'женский'}.", ephemeral=True)
-
-        await self.cog._send_log(
-            inter.guild,
-            "Смена пола" if self.change else "Верификация",
-            disnake.Color.green(),
-            [("Модератор", inter.author.mention), ("Пользователь", self.target.mention), ("Новый пол", "мужской" if gender=="male" else "женский")]
-        )
-
-
-class ReprimandBranchView(disnake.ui.View):
-    def __init__(self, cog, target):
-        super().__init__(timeout=60)
-        self.cog = cog
-        self.target = target
-
-    @disnake.ui.button(label="Саппорты", style=disnake.ButtonStyle.red, custom_id="reprimand_support")
-    async def support_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.open_reprimand_modal(inter, "support")
-
-    @disnake.ui.button(label="Модераторы", style=disnake.ButtonStyle.red, custom_id="reprimand_moderator")
-    async def moderator_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.open_reprimand_modal(inter, "moderator")
-
-    @disnake.ui.button(label="Контроль", style=disnake.ButtonStyle.red, custom_id="reprimand_control")
-    async def control_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.open_reprimand_modal(inter, "control")
-
-    @disnake.ui.button(label="Администрация", style=disnake.ButtonStyle.red, custom_id="reprimand_admin")
-    async def admin_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.open_reprimand_modal(inter, "admin")
-
-    async def open_reprimand_modal(self, inter, branch):
-        modal = ReprimandModal(self.cog, self.target, branch)
-        await inter.response.send_modal(modal)
 
 
 class ReprimandModal(disnake.ui.Modal):
@@ -1105,23 +1157,11 @@ class ReprimandModal(disnake.ui.Modal):
 
         role_id = self.cog.config["roles"][f"warn_{self.branch}"]
         role = inter.guild.get_role(role_id)
-        if role in self.target.roles:
-            await inter.response.send_message("❌ У пользователя уже есть активный выговор по этой ветке.", ephemeral=True)
-            return
 
         await self.target.add_roles(role, reason=reason)
         add_punishment(self.target.id, f"reprimand_{self.branch}", role.id, end_time, reason)
 
-        embed = disnake.Embed(title=f"📢 Выговор ({self.branch})", color=disnake.Color.orange())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Пользователь", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        if end_time:
-            embed.add_field(name="Срок", value=f"до <t:{int(end_time)}:f>")
-        else:
-            embed.add_field(name="Срок", value="бессрочно")
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+        await self.cog._send_log(inter, "reprimand", self.branch, self.target, end_time, reason)
         await self.cog._dm_user(self.target, f"📢 Вы получили выговор ({self.branch}).\nПричина: {reason}")
         await inter.response.send_message(f"✅ Выговор ({self.branch}) выдан {self.target.mention}.", ephemeral=True)
 
@@ -1159,48 +1199,12 @@ class UnreprimandModal(disnake.ui.Modal):
         if role in self.target.roles:
             await self.target.remove_roles(role, reason=reason)
             remove_punishment(self.target.id, role.id)
-
-            embed = disnake.Embed(title="✅ Снятие выговора", color=disnake.Color.green())
-            embed.add_field(name="Модератор", value=inter.author.mention)
-            embed.add_field(name="Пользователь", value=self.target.mention)
-            embed.add_field(name="Причина", value=reason, inline=False)
-            await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+            branch = reprimand_punishment["type"].replace("reprimand_", "")
+            await self.cog._send_log(inter, "unreprimand", branch, self.target, reason=reason)
             await self.cog._dm_user(self.target, f"✅ Ваш выговор снят.\nПричина: {reason}")
             await inter.response.send_message(f"✅ Выговор снят с {self.target.mention}.", ephemeral=True)
         else:
             await inter.response.send_message("❌ Ошибка: роль выговора не найдена.", ephemeral=True)
-
-
-class CHSBranchView(disnake.ui.View):
-    def __init__(self, cog, target):
-        super().__init__(timeout=60)
-        self.cog = cog
-        self.target = target
-
-    @disnake.ui.button(label="Саппорты", style=disnake.ButtonStyle.red, custom_id="chs_support")
-    async def support_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.open_chs_modal(inter, "support")
-
-    @disnake.ui.button(label="Модераторы", style=disnake.ButtonStyle.red, custom_id="chs_moderator")
-    async def moderator_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.open_chs_modal(inter, "moderator")
-
-    @disnake.ui.button(label="Контроль", style=disnake.ButtonStyle.red, custom_id="chs_control")
-    async def control_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.open_chs_modal(inter, "control")
-
-    @disnake.ui.button(label="Администрация", style=disnake.ButtonStyle.red, custom_id="chs_admin")
-    async def admin_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.open_chs_modal(inter, "admin")
-
-    @disnake.ui.button(label="Общий ЧС", style=disnake.ButtonStyle.red, custom_id="chs_common")
-    async def common_button(self, button: disnake.ui.Button, inter: disnake.MessageInteraction):
-        await self.open_chs_modal(inter, "common")
-
-    async def open_chs_modal(self, inter, branch):
-        modal = CHSModal(self.cog, self.target, branch)
-        await inter.response.send_modal(modal)
 
 
 class CHSModal(disnake.ui.Modal):
@@ -1223,19 +1227,11 @@ class CHSModal(disnake.ui.Modal):
         reason = inter.text_values["reason"]
         role_id = self.cog.config["roles"][f"chs_{self.branch}"]
         role = inter.guild.get_role(role_id)
-        if role in self.target.roles:
-            await inter.response.send_message("❌ У пользователя уже есть ЧС по этой ветке.", ephemeral=True)
-            return
 
         await self.target.add_roles(role, reason=reason)
         add_punishment(self.target.id, f"chs_{self.branch}", role.id, None, reason)
 
-        embed = disnake.Embed(title=f"⛔ ЧС состава ({self.branch})", color=disnake.Color.red())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Пользователь", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+        await self.cog._send_log(inter, "chs", self.branch, self.target, reason=reason)
         await self.cog._dm_user(self.target, f"⛔ Вы попали в ЧС состава ({self.branch}).\nПричина: {reason}")
         await inter.response.send_message(f"✅ ЧС ({self.branch}) выдано {self.target.mention}.", ephemeral=True)
 
@@ -1273,13 +1269,8 @@ class UnCHSModal(disnake.ui.Modal):
         if role in self.target.roles:
             await self.target.remove_roles(role, reason=reason)
             remove_punishment(self.target.id, role.id)
-
-            embed = disnake.Embed(title="✅ Снятие ЧС", color=disnake.Color.green())
-            embed.add_field(name="Модератор", value=inter.author.mention)
-            embed.add_field(name="Пользователь", value=self.target.mention)
-            embed.add_field(name="Причина", value=reason, inline=False)
-            await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+            branch = chs_punishment["type"].replace("chs_", "")
+            await self.cog._send_log(inter, "unchs", branch, self.target, reason=reason)
             await self.cog._dm_user(self.target, f"✅ Ваше ЧС снято.\nПричина: {reason}")
             await inter.response.send_message(f"✅ ЧС снято с {self.target.mention}.", ephemeral=True)
         else:
@@ -1322,23 +1313,11 @@ class SuspensionModal(disnake.ui.Modal):
 
         role_id = self.cog.config["roles"]["ostranenie"]
         role = inter.guild.get_role(role_id)
-        if role in self.target.roles:
-            await inter.response.send_message("❌ У пользователя уже есть активное отстранение.", ephemeral=True)
-            return
 
         await self.target.add_roles(role, reason=reason)
         add_punishment(self.target.id, "suspension", role.id, end_time, reason)
 
-        embed = disnake.Embed(title="⏳ Отстранение", color=disnake.Color.dark_red())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Пользователь", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        if end_time:
-            embed.add_field(name="Срок", value=f"до <t:{int(end_time)}:f>")
-        else:
-            embed.add_field(name="Срок", value="бессрочно")
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
+        await self.cog._send_log(inter, "suspension", None, self.target, end_time, reason)
         await self.cog._dm_user(self.target, f"⏳ Вы получили отстранение.\nПричина: {reason}")
         await inter.response.send_message(f"✅ Отстранение выдано {self.target.mention}.", ephemeral=True)
 
@@ -1362,21 +1341,15 @@ class UnsuspensionModal(disnake.ui.Modal):
         reason = inter.text_values["reason"]
         role_id = self.cog.config["roles"]["ostranenie"]
         role = inter.guild.get_role(role_id)
-        if role not in self.target.roles:
+
+        if role in self.target.roles:
+            await self.target.remove_roles(role, reason=reason)
+            remove_punishment(self.target.id, role.id)
+            await self.cog._send_log(inter, "unsuspension", None, self.target, reason=reason)
+            await self.cog._dm_user(self.target, f"✅ Ваше отстранение снято.\nПричина: {reason}")
+            await inter.response.send_message(f"✅ Отстранение снято с {self.target.mention}.", ephemeral=True)
+        else:
             await inter.response.send_message("❌ У пользователя нет активного отстранения.", ephemeral=True)
-            return
-
-        await self.target.remove_roles(role, reason=reason)
-        remove_punishment(self.target.id, role.id)
-
-        embed = disnake.Embed(title="✅ Снятие отстранения", color=disnake.Color.green())
-        embed.add_field(name="Модератор", value=inter.author.mention)
-        embed.add_field(name="Пользователь", value=self.target.mention)
-        embed.add_field(name="Причина", value=reason, inline=False)
-        await log_action(inter.guild, self.cog.config["log_channel"], embed)
-
-        await self.cog._dm_user(self.target, f"✅ Ваше отстранение снято.\nПричина: {reason}")
-        await inter.response.send_message(f"✅ Отстранение снято с {self.target.mention}.", ephemeral=True)
 
 
 def setup(bot):
