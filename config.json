@@ -1,6 +1,4 @@
 {
-  "token"= os.getenv('DISCORD_TOKEN'),
-
   "log_channel": 1446341671712198716,
   "report_channel": 1446341670751965226,
 
@@ -25,4 +23,5 @@
     "mod_zone": 1446341672265846867
   }
 }
+
 
