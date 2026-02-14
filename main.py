@@ -68,5 +68,3 @@ async def check_punishments():
 async def on_ready():
     print(f"Бот запущен как {bot.user}")
     check_punishments.start()
-
-bot.run(config["token"])
