@@ -12,11 +12,14 @@ class Voice(commands.Cog):
     def load_data(self):
         try:
             with open(self.data_file, "r") as f:
-                return json.load(f)
-        except FileNotFoundError:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError):
             return {}
 
     def save_data(self, data):
+        import os
+        os.makedirs(os.path.dirname(self.data_file), exist_ok=True)
         with open(self.data_file, "w") as f:
             json.dump(data, f, indent=4)
 
@@ -72,16 +75,16 @@ class Voice(commands.Cog):
     async def voice(
         self,
         inter: disnake.AppCmdInter,
-        группа: str = commands.Param(choices=["support", "moderator"]),
-        пользователь: disnake.Member = None
+        group: str = commands.Param(name="группа", choices=["support", "moderator"]),
+        user: disnake.Member = commands.Param(name="пользователь", default=None)
     ):
-        if not пользователь:
-            пользователь = inter.author
+        if not user:
+            user = inter.author
 
         data = self.load_data()
-        user_data = data.get(str(пользователь.id), {"verification": 0, "mod": 0})
+        user_data = data.get(str(user.id), {"verification": 0, "mod": 0})
 
-        if группа == "support":
+        if group == "support":
             minutes = user_data["verification"] / 60
             zone_name = "верификации"
         else:
@@ -89,7 +92,7 @@ class Voice(commands.Cog):
             zone_name = "модераторской"
 
         await inter.response.send_message(
-            f"Пользователь {пользователь.mention} провёл {minutes:.2f} мин. в зоне {zone_name}."
+            f"Пользователь {user.mention} провёл {minutes:.2f} мин. в зоне {zone_name}."
         )
 
 def setup(bot):
