@@ -3,6 +3,7 @@ from disnake.ext import commands, tasks
 import json
 import os
 import datetime
+import python-dotenv
 
 # Используем InteractionBot (не требует префикса)
 intents = disnake.Intents.all()
@@ -68,4 +69,5 @@ async def check_punishments():
 async def on_ready():
     print(f"Бот запущен как {bot.user}")
     check_punishments.start()
+
 
