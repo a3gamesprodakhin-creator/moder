@@ -3,7 +3,8 @@ from disnake.ext import commands, tasks
 import json
 import os
 import datetime
-import python-dotenv
+from dotenv import load_dotenv
+load_dotenv()
 
 # Используем InteractionBot (не требует префикса)
 intents = disnake.Intents.all()
