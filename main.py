@@ -3,8 +3,6 @@ from disnake.ext import commands, tasks
 import json
 import os
 import datetime
-from dotenv import load_dotenv
-load_dotenv()
 
 # Используем InteractionBot (не требует префикса)
 intents = disnake.Intents.all()
@@ -47,8 +45,17 @@ async def check_punishments():
                     if role:
                         await member.remove_roles(role)
                     try:
-                        await member.send(f"Ваше наказание `{p['type']}` автоматически снято.")
-                    except:
+                        embed = disnake.Embed(
+                            title="✅ Наказание снято",
+                            color=0x2ecc71
+                        )
+                        if guild.icon:
+                            embed.set_thumbnail(url=guild.icon.url)
+                        embed.add_field(name="Сервер", value=guild.name, inline=False)
+                        embed.add_field(name="Тип наказания", value=p["type"], inline=False)
+                        embed.add_field(name="Причина снятия", value="Срок наказания истёк", inline=False)
+                        await member.send(embed=embed)
+                    except Exception:
                         pass
                 changed = True
                 # это наказание не добавляем в новый список (оно удаляется)
@@ -70,5 +77,4 @@ async def check_punishments():
 async def on_ready():
     print(f"Бот запущен как {bot.user}")
     check_punishments.start()
-
 

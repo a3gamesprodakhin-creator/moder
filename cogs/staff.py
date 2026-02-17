@@ -80,38 +80,6 @@ class StaffControl(commands.Cog):
 
         return False
 
-    async def _send_staff_log(self, inter, action_type, role, users, reason="Не указана"):
-        if action_type == "demote":
-            channel_id = self.config.get("staff_log_channel", self.config["log_channel"])
-        else:
-            channel_id = self.config["log_channel"]
-        channel = inter.guild.get_channel(channel_id)
-        if not channel:
-            return
-
-        if action_type == "promote":
-            title = "Выдача стафф роли"
-            color = disnake.Color.green()
-        else:
-            title = "Снятие со стафф роли"
-            color = disnake.Color.red()
-
-        role_line = f"{role.name} ({role.id})"
-        users_lines = "\n".join(f"• {u.mention} [{u.display_name}]" for u in users)
-
-        description = (
-            f"> **Роль:**\n```{role_line}```\n"
-            f"> **Исполнитель:**\n"
-            f"• {inter.author.mention}\n"
-            f"• **Имя:** {inter.author.display_name}\n"
-            f"• **ID:** {inter.author.id}\n"
-            f"> **Причина:**\n```{reason}```\n"
-            f"> **Пользователи:**\n{users_lines}"
-        )
-
-        embed = disnake.Embed(title=title, description=description, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
-        await channel.send(embed=embed)
-
     @commands.slash_command(name="staff", description="Управление составом")
     async def staff(self, inter: disnake.AppCmdInter):
         pass
